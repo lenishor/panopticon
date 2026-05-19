@@ -23,6 +23,9 @@
   <key>ExitTimeOut</key>
   <integer>10</integer>
 
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
   <key>KeepAlive</key>
   <dict>
     <key>SuccessfulExit</key>
