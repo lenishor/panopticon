@@ -22,6 +22,7 @@ Override the root dir with `PANOPTICON_ROOT` in the plist's `EnvironmentVariable
 - Homebrew bash (`brew install bash`) — the script uses `wait -n` and other bash 4+ features; system bash 3.2 is too old.
 - ffmpeg with libx265 (`brew install ffmpeg`).
 - An mkv-capable player for review (e.g. `brew install --cask iina` or `vlc`). QuickTime/Preview won't open `.mkv`.
+- Optional: `sleepwatcher` (`brew install sleepwatcher`) to cleanly stop and resume recording around system sleep. Without it, the agent runs through sleeps but timers and PTS get smeared by macOS power management, so segment boundaries drift.
 
 ## Install
 
@@ -56,7 +57,8 @@ rm ~/Library/LaunchAgents/local.panopticon.plist
 
 - `panopticon.sh` — the recorder; discovers displays, spawns one ffmpeg per display, manages hourly rotation, handles signal-translation cleanup (launchd SIGTERM → SIGINT to ffmpeg, then SIGKILL after 5s).
 - `local.panopticon.plist` — the launchd agent definition. Symlinked into `~/Library/LaunchAgents/` by `install.sh`.
-- `install.sh` — bootstraps the agent.
+- `sleep.sh`, `wake.sh` — sleepwatcher hooks that bootout the agent before sleep and bootstrap it after wake. Symlinked into `~/.sleep` and `~/.wakeup` by `install.sh` if sleepwatcher is present.
+- `install.sh` — bootstraps the agent and (if sleepwatcher is installed) wires up the sleep/wake hooks.
 
 ## Notes on the design
 
@@ -65,3 +67,5 @@ Segments are written as **mkv**. It's robust to truncation: even if ffmpeg crash
 Hourly rotation is **bash-managed**, not via ffmpeg's `-f segment` muxer. The segment muxer mis-tracks PTS when combined with fragmented inner formats, and ffmpeg's PTS clock advances slowly when AVFoundation's source is mostly idle (display sleep), so neither `-segment_time` nor `-t` reliably triggers on wall time. Instead the script runs one ffmpeg per screen in parallel, with a `sleep 3600 &` watchdog; whichever wakes first (the timer, or any ffmpeg dying) tears the batch down and the loop restarts with fresh filenames.
 
 ffmpeg on macOS AVFoundation **ignores SIGTERM** — the script sends SIGINT on shutdown instead, then escalates to SIGKILL after a short grace period. This is why `panopticon.sh` is bash, not just an ffmpeg invocation: it needs to translate launchd's SIGTERM into something ffmpeg actually responds to.
+
+**Sleep/wake handling.** macOS pauses launchd timers (and ffmpeg) during system sleep, so an agent that runs straight through a closed-lid period produces a single mkv that spans hours of wall time with most of its PTS clustered around the brief active moments. To get clean boundaries, `install.sh` symlinks `sleep.sh` and `wake.sh` into `~/.sleep` and `~/.wakeup`, which sleepwatcher runs at the right moments — bootout before sleep so the in-progress mkv flushes, bootstrap after wake so the next file starts fresh. Note that sleepwatcher only supports a single `~/.sleep` / `~/.wakeup` per user, so if you already use those for unrelated logic, `install.sh` will refuse to overwrite and you'll need to merge them by hand.
